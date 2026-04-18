@@ -18,6 +18,7 @@ from email.mime.text import MIMEText
 from typing import Any
 
 import requests
+from anthropic import Anthropic
 from openai import OpenAI
 
 # --------------------------------------------------------------------------- #
@@ -31,6 +32,8 @@ SMALL_GROUP_MAX_MEMBERS = 15
 MAX_MESSAGES_PER_CHAT = 30
 MAX_AWAITING_ITEMS = 20
 OPENAI_MODEL = "gpt-4o-mini"
+CLAUDE_MODEL = "claude-haiku-4-5"
+CLAUDE_MAX_TOKENS = 4096
 CHAT_PAGE_LIMIT = 100
 
 CHAT_FETCH_WINDOW_DAYS = 30
@@ -56,7 +59,11 @@ def env(name: str, default: str | None = None, required: bool = True) -> str:
 UNIPILE_API_KEY = env("UNIPILE_API_KEY")
 UNIPILE_API_URL = env("UNIPILE_API_URL")
 UNIPILE_ACCOUNT_ID = env("UNIPILE_ACCOUNT_ID")
-OPENAI_API_KEY = env("OPENAI_API_KEY")
+OPENAI_API_KEY = env("OPENAI_API_KEY", required=False)
+ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", required=False)
+if not OPENAI_API_KEY and not ANTHROPIC_API_KEY:
+    print("❌ Set either ANTHROPIC_API_KEY or OPENAI_API_KEY.")
+    sys.exit(1)
 GMAIL_ADDRESS = env("GMAIL_ADDRESS")
 GMAIL_APP_PASSWORD = env("GMAIL_APP_PASSWORD")
 RECIPIENT_EMAIL = env("RECIPIENT_EMAIL", default=GMAIL_ADDRESS, required=False) or GMAIL_ADDRESS
@@ -442,13 +449,11 @@ Exact section template (use these labels verbatim):
 """
 
 
-def call_openai(
+def _build_llm_payload(
     unread: dict[str, list[dict[str, Any]]],
     waiting_on_you: list[dict[str, Any]],
     waiting_on_them: list[dict[str, Any]],
 ) -> str:
-    client = OpenAI(api_key=OPENAI_API_KEY)
-
     reply_today_pool = {
         "dms": unread.get("dms", []),
         "small_groups": unread.get("small_groups", []),
@@ -457,19 +462,20 @@ def call_openai(
         {"name": g["name"], "message_count": g.get("message_count", g.get("unread_count", 0))}
         for g in unread.get("large_groups", [])
     ]
-
     payload = {
         "reply_today": reply_today_pool,
         "waiting_on_you": waiting_on_you,
         "waiting_on_them": waiting_on_them,
         "group_activity": group_activity,
     }
-
-    user_message = (
+    return (
         "Produce the digest HTML for the following data. Skip any empty sections.\n\n"
         f"{json.dumps(payload, ensure_ascii=False, indent=2)}"
     )
 
+
+def call_openai(user_message: str) -> str:
+    client = OpenAI(api_key=OPENAI_API_KEY)
     response = client.chat.completions.create(
         model=OPENAI_MODEL,
         temperature=0.3,
@@ -479,6 +485,32 @@ def call_openai(
         ],
     )
     return (response.choices[0].message.content or "").strip()
+
+
+def call_claude(user_message: str) -> str:
+    client = Anthropic(api_key=ANTHROPIC_API_KEY)
+    response = client.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=CLAUDE_MAX_TOKENS,
+        temperature=0.3,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_message}],
+    )
+    parts = [block.text for block in response.content if getattr(block, "type", None) == "text"]
+    return "".join(parts).strip()
+
+
+def call_llm(
+    unread: dict[str, list[dict[str, Any]]],
+    waiting_on_you: list[dict[str, Any]],
+    waiting_on_them: list[dict[str, Any]],
+) -> str:
+    user_message = _build_llm_payload(unread, waiting_on_you, waiting_on_them)
+    if ANTHROPIC_API_KEY:
+        print(f"   · provider: Anthropic ({CLAUDE_MODEL})")
+        return call_claude(user_message)
+    print(f"   · provider: OpenAI ({OPENAI_MODEL})")
+    return call_openai(user_message)
 
 
 # --------------------------------------------------------------------------- #
@@ -600,7 +632,7 @@ def main() -> None:
         return
 
     print("🤖 Summarising…")
-    body_html = call_openai(unread, waiting_on_you, waiting_on_them)
+    body_html = call_llm(unread, waiting_on_you, waiting_on_them)
 
     if not body_html:
         print("⚠️  OpenAI returned empty body — falling back to inbox zero message.")

@@ -17,7 +17,11 @@ You'll need accounts on three services. Sign-up links:
 
 1. **GitHub** — https://github.com/signup (free)
 2. **Unipile** — https://www.unipile.com (free tier works for personal use — this is what actually talks to WhatsApp for us)
-3. **OpenAI** — https://platform.openai.com/signup (a few dollars of credit lasts months at this volume)
+3. **One of:**
+   - **Anthropic (Claude)** — https://console.anthropic.com (recommended; a few dollars of credit lasts months at this volume), **OR**
+   - **OpenAI** — https://platform.openai.com/signup
+
+   You only need one. If you set both, Claude is used.
 
 You'll also need a **Gmail account** you're willing to send from. A second/throwaway Gmail is fine.
 
@@ -44,12 +48,22 @@ Still inside the Unipile dashboard:
 | `UNIPILE_API_URL` | Shown next to the key, e.g. `https://api8.unipile.com:13888` — copy it exactly (the script appends `/api/v1` automatically) |
 | `UNIPILE_ACCOUNT_ID` | **Accounts** page → click your WhatsApp account → copy the ID (a long string) |
 
-## Step 3 — Get your OpenAI API key
+## Step 3 — Get an AI API key (Claude *or* OpenAI)
+
+Pick one. Claude is recommended — similar price, very strong at this kind of summarisation.
+
+**Option A: Anthropic (Claude)**
+
+1. Go to https://console.anthropic.com and sign in.
+2. **Settings** → **API keys** → **Create key** → name it "whatsapp digest" → copy the key (starts with `sk-ant-…`). You only see it once.
+3. **Settings** → **Billing** → add **$5 or $10** of credit. Lasts many months at this usage.
+
+**Option B: OpenAI**
 
 1. Go to https://platform.openai.com/api-keys.
 2. Click **Create new secret key** → name it "whatsapp digest" → **Create**.
 3. Copy the key (starts with `sk-…`). You only see it once.
-4. Go to https://platform.openai.com/settings/organization/billing/overview and add **$5 or $10** of credit. That will last many months at this usage.
+4. Go to https://platform.openai.com/settings/organization/billing/overview and add **$5 or $10** of credit.
 
 ## Step 4 — Create a Gmail app password
 
@@ -73,7 +87,8 @@ You can't use your normal Gmail password — Google requires a special "app pass
 | `UNIPILE_API_KEY` | Your Unipile API key from Step 2 |
 | `UNIPILE_API_URL` | Your Unipile API URL from Step 2, e.g. `https://api8.unipile.com:13888` |
 | `UNIPILE_ACCOUNT_ID` | Your WhatsApp account ID from Step 2 |
-| `OPENAI_API_KEY` | Your OpenAI key from Step 3 |
+| `ANTHROPIC_API_KEY` | Your Claude key from Step 3 (set this **OR** `OPENAI_API_KEY`) |
+| `OPENAI_API_KEY` | Your OpenAI key from Step 3 (only if you didn't set `ANTHROPIC_API_KEY`) |
 | `GMAIL_ADDRESS` | The Gmail address you want to send FROM |
 | `GMAIL_APP_PASSWORD` | The 16-character app password from Step 4 |
 | `RECIPIENT_EMAIL` | The address you want the digest sent TO (can be the same as above) |
@@ -129,4 +144,4 @@ To change when it runs, edit the `cron:` line in `.github/workflows/digest.yml`.
 
 ## Privacy note
 
-Your unread message previews are sent to OpenAI for summarisation. If that's not acceptable for your chats, don't use this.
+Your unread message previews are sent to whichever AI provider you configured (Anthropic or OpenAI) for summarisation. If that's not acceptable for your chats, don't use this.
