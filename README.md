@@ -41,7 +41,7 @@ Still inside the Unipile dashboard:
 | Value | Where to find it |
 |---|---|
 | `UNIPILE_API_KEY` | Top-right profile menu → **API Keys** → **Create** → copy the key (you only see it once — save it somewhere safe) |
-| `UNIPILE_DSN` | Same page, shown as something like `api8.unipile.com:13888` — copy it exactly, no `https://` |
+| `UNIPILE_API_URL` | Shown next to the key, e.g. `https://api8.unipile.com:13888` — copy it exactly (the script appends `/api/v1` automatically) |
 | `UNIPILE_ACCOUNT_ID` | **Accounts** page → click your WhatsApp account → copy the ID (a long string) |
 
 ## Step 3 — Get your OpenAI API key
@@ -71,7 +71,7 @@ You can't use your normal Gmail password — Google requires a special "app pass
 | Secret name | What to paste |
 |---|---|
 | `UNIPILE_API_KEY` | Your Unipile API key from Step 2 |
-| `UNIPILE_DSN` | Your Unipile DSN, e.g. `api8.unipile.com:13888` |
+| `UNIPILE_API_URL` | Your Unipile API URL from Step 2, e.g. `https://api8.unipile.com:13888` |
 | `UNIPILE_ACCOUNT_ID` | Your WhatsApp account ID from Step 2 |
 | `OPENAI_API_KEY` | Your OpenAI key from Step 3 |
 | `GMAIL_ADDRESS` | The Gmail address you want to send FROM |

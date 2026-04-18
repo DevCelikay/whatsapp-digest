@@ -28,7 +28,7 @@ jobs:
       - name: Run digest
         env:
           UNIPILE_API_KEY: ${{ secrets.UNIPILE_API_KEY }}
-          UNIPILE_DSN: ${{ secrets.UNIPILE_DSN }}
+          UNIPILE_API_URL: ${{ secrets.UNIPILE_API_URL }}
           UNIPILE_ACCOUNT_ID: ${{ secrets.UNIPILE_ACCOUNT_ID }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}

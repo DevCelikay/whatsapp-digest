@@ -54,14 +54,26 @@ def env(name: str, default: str | None = None, required: bool = True) -> str:
 
 
 UNIPILE_API_KEY = env("UNIPILE_API_KEY")
-UNIPILE_DSN = env("UNIPILE_DSN")
+UNIPILE_API_URL = env("UNIPILE_API_URL")
 UNIPILE_ACCOUNT_ID = env("UNIPILE_ACCOUNT_ID")
 OPENAI_API_KEY = env("OPENAI_API_KEY")
 GMAIL_ADDRESS = env("GMAIL_ADDRESS")
 GMAIL_APP_PASSWORD = env("GMAIL_APP_PASSWORD")
 RECIPIENT_EMAIL = env("RECIPIENT_EMAIL", default=GMAIL_ADDRESS, required=False) or GMAIL_ADDRESS
 
-UNIPILE_BASE = f"https://{UNIPILE_DSN}/api/v1"
+
+def _resolve_unipile_base() -> str:
+    url = UNIPILE_API_URL.strip().rstrip("/")
+    if not url.startswith(("http://", "https://")):
+        url = f"https://{url}"
+    # Accept either a bare host (e.g. https://api8.unipile.com:13888) or a
+    # full base that already includes /api/v1. Normalise to include /api/v1.
+    if "/api/v" not in url:
+        url = f"{url}/api/v1"
+    return url
+
+
+UNIPILE_BASE = _resolve_unipile_base()
 UNIPILE_HEADERS = {"X-API-KEY": UNIPILE_API_KEY, "Accept": "application/json"}
 
 # --------------------------------------------------------------------------- #
