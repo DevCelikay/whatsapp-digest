@@ -169,20 +169,78 @@ def should_skip(chat: dict[str, Any]) -> bool:
     return False
 
 
+_chat_name_cache: dict[str, str] = {}
+
+
+def _is_self(msg: dict[str, Any]) -> bool:
+    """Tolerant check for 'this message was sent by the user'.
+
+    Unipile has been observed to return is_sender as int, bool or string.
+    """
+    v = msg.get("is_sender")
+    return v is True or v == 1 or (isinstance(v, str) and v.strip() in {"1", "true", "True"})
+
+
+def _is_self_attendee(a: dict[str, Any]) -> bool:
+    v = a.get("is_self")
+    return v is True or v == 1 or (isinstance(v, str) and v.strip() in {"1", "true", "True"})
+
+
+def _attendee_name(a: dict[str, Any]) -> str | None:
+    for key in ("name", "contact_name", "attendee_name", "display_name", "profile_name"):
+        v = a.get(key)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return None
+
+
+def _phone_from_identifier(identifier: str | None) -> str | None:
+    if not identifier or "@" not in identifier:
+        return None
+    phone = identifier.split("@", 1)[0]
+    if phone.isdigit():
+        return f"+{phone}"
+    return phone or None
+
+
+def dm_contact_name(chat: dict[str, Any]) -> str | None:
+    """Best-effort name for the other party in a DM."""
+    for key in ("attendee_name", "contact_name", "display_name"):
+        v = chat.get(key)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    attendees = get_attendees(chat.get("id", ""))
+    for a in attendees:
+        if _is_self_attendee(a):
+            continue
+        name = _attendee_name(a)
+        if name:
+            return name
+    return None
+
+
 def chat_name(chat: dict[str, Any]) -> str:
-    name = chat.get("name")
-    if name:
-        return name
-    identifier = chat.get("attendee_public_identifier") or ""
-    if "@" in identifier:
-        phone = identifier.split("@", 1)[0]
-        if phone.isdigit():
-            return f"+{phone}"
-        return phone or "Unknown"
-    return "Unknown"
+    cid = chat.get("id", "")
+    if cid and cid in _chat_name_cache:
+        return _chat_name_cache[cid]
+
+    name: str | None = None
+    raw = chat.get("name")
+    if isinstance(raw, str) and raw.strip():
+        name = raw.strip()
+
+    if not name and not is_group(chat):
+        name = dm_contact_name(chat)
+
+    if not name:
+        name = _phone_from_identifier(chat.get("attendee_public_identifier")) or "Unknown"
+
+    if cid:
+        _chat_name_cache[cid] = name
+    return name
 
 
-def format_message(msg: dict[str, Any], include_sender: bool = True) -> str:
+def format_message(msg: dict[str, Any], contact_label: str | None = None) -> str:
     text = msg.get("text")
     if not text:
         mtype = msg.get("message_type") or "MESSAGE"
@@ -190,10 +248,15 @@ def format_message(msg: dict[str, Any], include_sender: bool = True) -> str:
     text = text.strip()
     if len(text) > 400:
         text = text[:397].rstrip() + "…"
+
+    if _is_self(msg):
+        return f"YOU: {text}"
     sender = msg.get("sender_attendee_name")
-    if include_sender and sender and not msg.get("is_sender"):
-        return f"{sender}: {text}"
-    return text
+    if isinstance(sender, str) and sender.strip():
+        return f"{sender.strip()}: {text}"
+    if contact_label:
+        return f"{contact_label}: {text}"
+    return f"THEM: {text}"
 
 
 # --------------------------------------------------------------------------- #
@@ -235,19 +298,25 @@ def fetch_messages(chat_id: str, limit: int) -> list[dict[str, Any]]:
     return data.get("items", []) or []
 
 
-_attendee_cache: dict[str, int] = {}
+_attendees_cache: dict[str, list[dict[str, Any]]] = {}
+
+
+def get_attendees(chat_id: str) -> list[dict[str, Any]]:
+    if not chat_id:
+        return []
+    if chat_id in _attendees_cache:
+        return _attendees_cache[chat_id]
+    try:
+        data = unipile_get(f"/chats/{chat_id}/attendees")
+        items = data.get("items", []) or []
+    except requests.HTTPError:
+        items = []
+    _attendees_cache[chat_id] = items
+    return items
 
 
 def attendee_count(chat_id: str) -> int:
-    if chat_id in _attendee_cache:
-        return _attendee_cache[chat_id]
-    try:
-        data = unipile_get(f"/chats/{chat_id}/attendees")
-        count = len(data.get("items", []) or [])
-    except requests.HTTPError:
-        count = 0
-    _attendee_cache[chat_id] = count
-    return count
+    return len(get_attendees(chat_id))
 
 
 def group_size_class(chat: dict[str, Any]) -> str:
@@ -284,7 +353,7 @@ def build_unread_data(chats: list[dict[str, Any]]) -> dict[str, list[dict[str, A
 
         filtered: list[dict[str, Any]] = []
         for msg in messages:
-            if msg.get("is_sender") == 1:
+            if _is_self(msg):
                 continue
             if hours_since(msg.get("timestamp")) > UNREAD_LOOKBACK_HOURS:
                 continue
@@ -295,10 +364,11 @@ def build_unread_data(chats: list[dict[str, Any]]) -> dict[str, list[dict[str, A
 
         filtered.reverse()  # chronological
 
+        name = chat_name(chat)
         entry = {
-            "name": chat_name(chat),
+            "name": name,
             "unread_count": unread,
-            "messages": [format_message(m) for m in filtered],
+            "messages": [format_message(m, name) for m in filtered],
         }
 
         klass = group_size_class(chat)
@@ -330,7 +400,7 @@ def build_waiting_on_you(chats: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
 
         newest = messages[0]
-        if newest.get("is_sender") == 1:
+        if _is_self(newest):
             continue
 
         newest_age = hours_since(newest.get("timestamp"))
@@ -338,13 +408,14 @@ def build_waiting_on_you(chats: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
 
         chronological = list(reversed(messages))
+        name = chat_name(chat)
         items.append(
             {
-                "name": chat_name(chat),
+                "name": name,
                 "age": relative_time(newest_age),
                 "age_hours": newest_age,
                 "is_group": is_group(chat),
-                "recent_messages": [format_message(m) for m in chronological],
+                "recent_messages": [format_message(m, name) for m in chronological],
             }
         )
         if len(items) >= MAX_AWAITING_ITEMS:
@@ -373,7 +444,7 @@ def build_waiting_on_them(chats: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
 
         newest = messages[0]
-        if newest.get("is_sender") != 1:
+        if not _is_self(newest):
             continue
 
         newest_age = hours_since(newest.get("timestamp"))
@@ -381,13 +452,14 @@ def build_waiting_on_them(chats: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
 
         chronological = list(reversed(messages))
+        name = chat_name(chat)
         items.append(
             {
-                "name": chat_name(chat),
+                "name": name,
                 "age": relative_time(newest_age),
                 "age_hours": newest_age,
                 "is_group": is_group(chat),
-                "recent_messages": [format_message(m) for m in chronological],
+                "recent_messages": [format_message(m, name) for m in chronological],
             }
         )
         if len(items) >= MAX_AWAITING_ITEMS:
@@ -411,6 +483,13 @@ You receive four JSON lists describing the user's WhatsApp state:
 - waiting_on_them: chats where the user sent the last message 3+ days ago with no reply
 - group_activity: large group chats with unread activity
 
+MESSAGE LABELS — read carefully:
+- Every message is prefixed with a sender label.
+- Lines starting with "YOU: " are messages the USER sent. NEVER treat these as things the user needs to reply to.
+- Lines starting with a name or "THEM: " are from other people.
+- Before including any item, inspect the FINAL line in `recent_messages`. If it starts with "YOU: ", the user already replied — the thread is closed from the user's side. Only include it in waiting_on_them (if it's 3+ days old and qualifies), never in reply_today or waiting_on_you.
+- Conversely, if the last line is from YOU and the conversation feels resolved ("okay nice", "speak soon", confirming done, etc.), OMIT it entirely — do not put it in waiting_on_them either. The "waiting on them" section is for genuine open questions the user asked and got no answer to, not closed conversations.
+
 Rules:
 - Output ONLY HTML body content (no <html>, <head>, <body>, no preamble, no sign-off).
 - Start directly with the first <p class="label">.
@@ -418,7 +497,7 @@ Rules:
 - Filter noise: ignore "ok", "thanks", emoji-only reactions, acknowledgements, anything already handled.
 - Do not emit "(No reply needed)" entries — just omit them.
 - One bullet per item. "Waiting on you" items get one extra line for the suggested reply.
-- Suggested replies: 1–2 sentences, casual, match conversation tone, no corporate speak.
+- Suggested replies: 1–2 sentences, casual, match conversation tone, no corporate speak. Never invent content — if the thread is already closed by the user, do not suggest a reply at all; just omit the item.
 - If a suggested reply needs info only the user has, write: → Need your input: [what].
 - For group_activity, one-line vibe summary per group; flag if the user was tagged/mentioned.
 
